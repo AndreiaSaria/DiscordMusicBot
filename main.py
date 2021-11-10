@@ -11,13 +11,14 @@ bot = commands.Bot(command_prefix='--')
 
 
 #-----BOT MUSIC PLAY (VERY EARLY VER)-----
+# Where did I learn how to do this? Here:
 #https://stackoverflow.com/questions/64725932/discord-py-send-a-message-if-author-isnt-in-a-voice-channel
 #https://stackoverflow.com/questions/61900932/how-can-you-check-voice-channel-id-that-bot-is-connected-to-discord-py
 #https://www.youtube.com/watch?v=ml-5tXRmmFk
 #https://www.toptal.com/chatbot/how-to-make-a-discord-bot
-
-#do this https://stackoverflow.com/questions/66610012/discord-py-streaming-youtube-live-into-voice
+#https://stackoverflow.com/questions/66610012/discord-py-streaming-youtube-live-into-voice
 #https://github.com/Rapptz/discord.py/blob/master/examples/basic_voice.py
+
 youtube_dl.utils.bug_reports_message = lambda: ''
 ytdl_format_options = {
     'format': 'bestaudio/best',
@@ -92,6 +93,8 @@ async def song_done():
     del queue_ctx[0]
     del player_data[0]
     del queue_url[0]
+  else:
+    bot.dispatch('leave')
 
 
 @bot.command()
@@ -104,7 +107,7 @@ async def join(ctx):
         await vc.connect()
         await ctx.send(f"Joined **{vc}**")
     else:
-        await ctx.send("I'm already connected!")
+        print("I'm already connected!")
     
 @bot.event
 async def on_stream(ctx,url):
@@ -148,8 +151,17 @@ async def stream(ctx, *, url):
   else:
     queue_ctx.append(ctx)
     queue_url.append(url)
-    await ctx.send(f'Added to queue') #: {queue_url[len(queue_url)-1]}')
+    await ctx.send(f'Added to queue: {queue_url[len(queue_url)-1]}')
 
+@bot.command()
+async def leave(ctx):
+  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+  if voice.is_connected:
+    await voice.disconnect()
+  else:
+    await ctx.send('Bot is not on a voice channel')
+
+#Youtube download
 @bot.command()
 async def yt(ctx, *, url):
   """Plays from a url (almost anything youtube_dl supports)"""
@@ -160,14 +172,6 @@ async def yt(ctx, *, url):
     ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
 
   await ctx.send(f'Now playing: {player.title}')
-
-@bot.command()
-async def leave(ctx):
-  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-  if voice.is_connected:
-    await voice.disconnect()
-  else:
-    await ctx.send('Bot is not on a voice channel')
 
 @bot.command()
 async def play(ctx, *, query):
