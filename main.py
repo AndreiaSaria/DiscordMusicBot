@@ -40,27 +40,32 @@ ffmpeg_options = {
 ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
-        super().__init__(source, volume)
+  def __init__(self, source, *, data, volume=0.5):
+    super().__init__(source, volume)
 
-        self.data = data
+    self.data = data
 
-        self.title = data.get('title')
-        self.url = data.get('url')
+    self.title = data.get('title')
+    self.url = data.get('url')
+    self.duration = data.get('duration')
 
-    @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
-        loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+  @classmethod
+  async def from_url(cls, url, *, loop=None, stream=False):
+    loop = loop or asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
 
-        if 'entries' in data:
-            # take first item from a playlist
-            data = data['entries'][0]
+    if 'entries' in data:
+      # take first item from a playlist
+      data = data['entries'][0]
 
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+    filename = data['url'] if stream else ytdl.prepare_filename(data)
+    return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
+class PlayerData():
 
+  pass
+
+#guild class with player and task.
 player_data = []
 queue_ctx = []
 queue_url = []
@@ -69,7 +74,7 @@ done = True
 global task
 
 
-async def timer(seconds):
+async def timer(seconds,ctx):
   try:
     await asyncio.sleep(seconds)
   except asyncio.CancelledError:
@@ -77,10 +82,10 @@ async def timer(seconds):
     raise
   finally:
     print('Timer: after sleep')
-    await song_done()
+    await song_done(ctx)
 
 
-async def song_done():
+async def song_done(ctx):
   print('Song done was called')
   global done
   global queue_ctx
@@ -94,7 +99,7 @@ async def song_done():
     del player_data[0]
     del queue_url[0]
   else:
-    bot.dispatch('leave')
+    bot.dispatch('leave',ctx)
 
 
 @bot.command()
@@ -111,7 +116,6 @@ async def join(ctx):
     
 @bot.event
 async def on_stream(ctx,url):
-  print('ON Stream was called')
   global done
   global task
 
@@ -121,45 +125,69 @@ async def on_stream(ctx,url):
     async with ctx.typing():
       player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
       player_data.append(player.data)
-      #print(queue)
-      print(player_data[0]['duration'])
+      print(f'Duration {player.duration} in seconds' )
       ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-    task = asyncio.create_task(timer(player_data[0]['duration']))
+    task = asyncio.create_task(timer(player.duration,ctx))
     await ctx.send(f'Now playing: {player.title}')
+
+@bot.event
+async def on_leave(ctx):
+  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+  if voice.is_connected:
+    await voice.disconnect()
 
 @bot.command()
 async def stream(ctx, *, url):
-  print('Stream was called')
   """Streams from a url (same as yt, but doesn't predownload)"""
   global done
-  global task
+  global task #get guild tasks
   global queue_ctx
   global queue_url
 
-  if(done is True):
+  try: 
+    task
+  except NameError: #or task.done()
+  #if(done is True):
     done = False
     await join(ctx)
     async with ctx.typing():
       player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
       player_data.append(player.data)
-      #print(queue)
-      print(player_data[0]['duration'])
+      print(f'Duration {player.duration} in seconds')
       ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-    task = asyncio.create_task(timer(player_data[0]['duration']))
+    task = asyncio.create_task(timer(player.duration,ctx))
     await ctx.send(f'Now playing: {player.title}')
     
   else:
     queue_ctx.append(ctx)
     queue_url.append(url)
-    await ctx.send(f'Added to queue: {queue_url[len(queue_url)-1]}')
+    async with ctx.typing():
+      player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+      player_data.append(player.data)
+    await ctx.send(f'Added to queue: {player.title}')
 
 @bot.command()
 async def leave(ctx):
   voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
   if voice.is_connected:
     await voice.disconnect()
-  else:
-    await ctx.send('Bot is not on a voice channel')
+
+@bot.command()
+async def remove_from_queue(ctx, number:int):
+  async with ctx.typing():
+    await ctx.send(f'Removed {player_data[number].title} from queue')
+    del queue_ctx[number]
+    del player_data[number]
+    del queue_url[number]
+    
+
+
+@bot.command()
+async def stop(ctx):
+  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
+  voice.stop()
+  '''To cancel a running Task use the cancel() method. Calling it will cause the Task to throw a CancelledError exception into the wrapped coroutine. If a coroutine is awaiting on a Future object during cancellation, the Future object will be cancelled.'''
+  #how to cancel asyncio
 
 #Youtube download
 @bot.command()
