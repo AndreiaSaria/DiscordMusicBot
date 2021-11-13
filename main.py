@@ -61,58 +61,112 @@ class YTDLSource(discord.PCMVolumeTransformer):
     filename = data['url'] if stream else ytdl.prepare_filename(data)
     return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
-class PlayerData():
+class GuildData:
+  def __init__(self, guild):
+    self.guild = guild
+    self.player_data = None
+    self.player_ctx = None
+    self.done = True
+    self.task = None
 
-  pass
+  async def song_done(self):
+    self.done = True
+    self.voice_stop()
+    del self.player_data[0]
+    del self.player_ctx[0]
 
-#guild class with player and task.
-player_data = []
-queue_ctx = []
-queue_url = []
-global done
-done = True
-global task
+    if(len(self.player_data) > 0):
+      print(f'length of queue {len(self.player_data)}')
+      await self.play(self.player_ctx[0],self.player_data[0].url)
+    else:
+      await self.leave()
+
+  async def leave(self):
+    voice = discord.utils.get(bot.voice_clients, guild = self.guild)
+    if voice.is_connected:
+      await voice.disconnect()
+
+  async def join(self, ctx):
+    user = ctx.message.author
+    if user.voice is None:
+      await ctx.send(user.display_name + " you are not in a voice channel")
+      return False
+    vc = user.voice.channel
+    voice = discord.utils.get(bot.voice_clients, guild=self.guild)
+    if voice == None: # None being the default value if the bot isnt in a channel (which is why the is_connected() is returning errors)
+      await vc.connect()
+      await ctx.send(f"Joined **{vc}**")
+    #else:
+        #print("I'm already connected!")
+  
+  async def play(self, ctx, url):
+    if self.player_data is None:
+      self.player_data = []
+      self.player_ctx = []
+
+    if(self.done is True):
+      if await self.join(ctx) is False:
+        return
+    
+      self.done = False
+      async with ctx.typing():
+        try:
+          player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        except:
+          ctx.send('Error downloading')
+          self.done = True
+          return
+
+        self.player_data.append(player)
+        self.player_ctx.append(ctx)
+        print(f'Duration {player.duration} in seconds' )
+        ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
+      self.task = asyncio.create_task(timer(player.duration,self))
+      await ctx.send(f'Now playing: {player.title}'),
+    else:
+      async with ctx.typing():
+        try: 
+          player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
+        except:
+          ctx.send('Error downloading')
+          return
+          
+        self.player_data.append(player)
+        self.player_ctx.append(ctx)
+      await ctx.send(f'Added to queue: {player.title}')
+
+  async def remove_from_queue(self, ctx, i:int):
+    async with ctx.typing():
+      await ctx.send(f'Removing {self.player_data[i].title} from queue')
+      del self.player_data[i]
+      del self.player_ctx[i]
+  
+  def voice_stop(self):
+    voice = discord.utils.get(bot.voice_clients, guild=self.guild)
+    voice.stop()
+
+      
+
+global guilds
+guilds = []
 
 
-async def timer(seconds,ctx):
+async def timer(seconds,guildData):
   try:
     await asyncio.sleep(seconds)
   except asyncio.CancelledError:
     print('Timer: cancel sleep')
     raise
   finally:
-    print('Timer: after sleep')
-    await song_done(ctx)
-
-
-async def song_done(ctx):
-  print('Song done was called')
-  global done
-  global queue_ctx
-  global queue_url
-
-  done = True
-  if(len(queue_ctx) > 0):
-    print(f'length of queue {len(queue_ctx)}')
-    bot.dispatch('stream',queue_ctx[0],queue_url[0])
-    del queue_ctx[0]
-    del player_data[0]
-    del queue_url[0]
-  else:
-    bot.dispatch('leave',ctx)
+    print('timer song dome')
+    await guildData.song_done()
 
 
 @bot.command()
 async def join(ctx):
-    user = ctx.message.author
-    vc = user.voice.channel
-
-    voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if voice == None: # None being the default value if the bot isnt in a channel (which is why the is_connected() is returning errors)
-        await vc.connect()
-        await ctx.send(f"Joined **{vc}**")
-    else:
-        print("I'm already connected!")
+  print(ctx.guild)
+  guildData = GuildData(ctx.guild)
+  await guildData.join(ctx)
     
 @bot.event
 async def on_stream(ctx,url):
@@ -124,70 +178,38 @@ async def on_stream(ctx,url):
     await join(ctx)
     async with ctx.typing():
       player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-      player_data.append(player.data)
+      #player_data.append(player.data)
       print(f'Duration {player.duration} in seconds' )
       ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
     task = asyncio.create_task(timer(player.duration,ctx))
     await ctx.send(f'Now playing: {player.title}')
 
-@bot.event
-async def on_leave(ctx):
-  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-  if voice.is_connected:
-    await voice.disconnect()
 
 @bot.command()
 async def stream(ctx, *, url):
-  """Streams from a url (same as yt, but doesn't predownload)"""
-  global done
-  global task #get guild tasks
-  global queue_ctx
-  global queue_url
-
-  try: 
-    task
-  except NameError: #or task.done()
-  #if(done is True):
-    done = False
-    await join(ctx)
-    async with ctx.typing():
-      player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-      player_data.append(player.data)
-      print(f'Duration {player.duration} in seconds')
-      ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-    task = asyncio.create_task(timer(player.duration,ctx))
-    await ctx.send(f'Now playing: {player.title}')
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      print(count, value.guild)
+      if value.guild is ctx.guild:
+        print("Existing guild")
+        await guilds[count].play(ctx,url)
+        return
     
-  else:
-    queue_ctx.append(ctx)
-    queue_url.append(url)
-    async with ctx.typing():
-      player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-      player_data.append(player.data)
-    await ctx.send(f'Added to queue: {player.title}')
-
-@bot.command()
-async def leave(ctx):
-  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-  if voice.is_connected:
-    await voice.disconnect()
-
-@bot.command()
-async def remove_from_queue(ctx, number:int):
-  async with ctx.typing():
-    await ctx.send(f'Removed {player_data[number].title} from queue')
-    del queue_ctx[number]
-    del player_data[number]
-    del queue_url[number]
-    
+  guilds.append(GuildData(ctx.guild))
+  await guilds[len(guilds)-1].play(ctx,url)
 
 
 @bot.command()
-async def stop(ctx):
-  voice = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-  voice.stop()
-  '''To cancel a running Task use the cancel() method. Calling it will cause the Task to throw a CancelledError exception into the wrapped coroutine. If a coroutine is awaiting on a Future object during cancellation, the Future object will be cancelled.'''
-  #how to cancel asyncio
+async def skip(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      print(count, value.guild)
+      if value.guild is ctx.guild:
+        if value.done is False:
+          guilds[count].task.cancel()
+
 
 #Youtube download
 @bot.command()
