@@ -11,7 +11,7 @@ bot = commands.Bot(command_prefix='--')
 
 
 #-----BOT MUSIC PLAY (VERY EARLY VER)-----
-# Where did I learn how to do this? Here:
+# Where did I get this? Here:
 #https://stackoverflow.com/questions/64725932/discord-py-send-a-message-if-author-isnt-in-a-voice-channel
 #https://stackoverflow.com/questions/61900932/how-can-you-check-voice-channel-id-that-bot-is-connected-to-discord-py
 #https://www.youtube.com/watch?v=ml-5tXRmmFk
@@ -61,48 +61,58 @@ class YTDLSource(discord.PCMVolumeTransformer):
     filename = data['url'] if stream else ytdl.prepare_filename(data)
     return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
+  @classmethod
+  async def from_playlist(cls,url,*,loop=None,stream=False):
+    loop = loop or asyncio.get_event_loop()
+    data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+    if 'entries' in data:
+      for count, value in enumerate(data):
+        data[count] = data['entries'][0]
+
+    return data.get('url')
+
+
 class GuildData:
+  player_url = None
+  player_ctx = None
+  done = True
+  task = None
+
   def __init__(self, guild):
     self.guild = guild
-    self.player_data = None
-    self.player_ctx = None
-    self.done = True
-    self.task = None
 
   async def song_done(self):
     self.done = True
     self.voice_stop()
-    del self.player_data[0]
-    del self.player_ctx[0]
-
-    if(len(self.player_data) > 0):
-      print(f'length of queue {len(self.player_data)}')
-      await self.play(self.player_ctx[0],self.player_data[0].url)
+    print(self.get_voice().voice_members)
+    if(len(self.player_url) > 0):
+      print(f'Length of queue {len(self.player_url)} on guild {self.guild}')
+      await self.play(self.player_ctx[0],self.player_url[0])
+      del self.player_url[0]
+      del self.player_ctx[0]
     else:
       await self.leave()
 
   async def leave(self):
-    voice = discord.utils.get(bot.voice_clients, guild = self.guild)
+    voice = self.get_voice()
     if voice.is_connected:
       await voice.disconnect()
 
   async def join(self, ctx):
     user = ctx.message.author
     if user.voice is None:
-      await ctx.send(user.display_name + " you are not in a voice channel")
+      await ctx.send(user.display_name + " you are not in a voice channel!")
       return False
     vc = user.voice.channel
-    voice = discord.utils.get(bot.voice_clients, guild=self.guild)
-    if voice == None: # None being the default value if the bot isnt in a channel (which is why the is_connected() is returning errors)
+    voice = self.get_voice()
+    if voice == None: 
       await vc.connect()
-      await ctx.send(f"Joined **{vc}**")
-    #else:
-        #print("I'm already connected!")
+      await ctx.send(f"Joined **{vc}** voice channel")
   
   async def play(self, ctx, url):
-    if self.player_data is None:
-      self.player_data = []
+    if self.player_ctx is None:
       self.player_ctx = []
+      self.player_url = []
 
     if(self.done is True):
       if await self.join(ctx) is False:
@@ -110,39 +120,39 @@ class GuildData:
     
       self.done = False
       async with ctx.typing():
-        try:
-          player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-        except:
-          ctx.send('Error downloading')
-          self.done = True
-          return
+        player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
 
-        self.player_data.append(player)
-        self.player_ctx.append(ctx)
         print(f'Duration {player.duration} in seconds' )
         ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
       self.task = asyncio.create_task(timer(player.duration,self))
-      await ctx.send(f'Now playing: {player.title}'),
+      await ctx.send(f'Now playing: {player.title}')
     else:
-      async with ctx.typing():
-        try: 
-          player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-        except:
-          ctx.send('Error downloading')
-          return
-          
-        self.player_data.append(player)
-        self.player_ctx.append(ctx)
-      await ctx.send(f'Added to queue: {player.title}')
-
+      self.player_url.append(url)
+      self.player_ctx.append(ctx)
+      await ctx.send(f"Added '<{url}>' to queue")
+      
   async def remove_from_queue(self, ctx, i:int):
     async with ctx.typing():
-      await ctx.send(f'Removing {self.player_data[i].title} from queue')
-      del self.player_data[i]
-      del self.player_ctx[i]
-  
+      if len(self.player_url) < i or i-1 < 0:
+        await ctx.send(f"Hey {ctx.message.author.display_name} are you trying to fool me? This is out of the queue's bounds.")
+        return
+      await ctx.send(f"Removing '<{self.player_url[i-1]}>' from queue")
+      del self.player_url[i-1]
+      del self.player_ctx[i-1]
+      await self.queue(ctx)
+
+  async def queue(self,ctx):
+    if len(self.player_url) > 0:
+      for count, value in enumerate(self.player_url):
+        await ctx.send(f"Number {count + 1} is '<{value}>' sent by {self.player_ctx[count].message.author.display_name}")
+    else:
+      await ctx.send("I don't have a queue here")
+
+  def get_voice(self):
+    return discord.utils.get(bot.voice_clients, guild =self.guild)
+
   def voice_stop(self):
-    voice = discord.utils.get(bot.voice_clients, guild=self.guild)
+    voice = self.get_voice()
     voice.stop()
 
       
@@ -163,52 +173,94 @@ async def timer(seconds,guildData):
 
 
 @bot.command()
-async def join(ctx):
-  print(ctx.guild)
-  guildData = GuildData(ctx.guild)
-  await guildData.join(ctx)
-    
-@bot.event
-async def on_stream(ctx,url):
-  global done
-  global task
-
-  if(done is True):
-    done = False
-    await join(ctx)
-    async with ctx.typing():
-      player = await YTDLSource.from_url(url, loop=bot.loop, stream=True)
-      #player_data.append(player.data)
-      print(f'Duration {player.duration} in seconds' )
-      ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-    task = asyncio.create_task(timer(player.duration,ctx))
-    await ctx.send(f'Now playing: {player.title}')
-
-
-@bot.command()
-async def stream(ctx, *, url):
+async def play(ctx, *, url):
   global guilds
   if len(guilds) > 0:
     for count, value in enumerate(guilds):
-      print(count, value.guild)
       if value.guild is ctx.guild:
-        print("Existing guild")
+        print(f'Stream on existing guild {value.guild}')
         await guilds[count].play(ctx,url)
         return
     
   guilds.append(GuildData(ctx.guild))
   await guilds[len(guilds)-1].play(ctx,url)
 
+@bot.command()
+async def queue(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        await guilds[count].queue(ctx)
+        return
+  await ctx.send("Wait a minute, who are you? You are not in my list!")
+
+@bot.command()
+async def remove_from_queue(ctx, i:int):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        await guilds[count].remove_from_queue(ctx,i)
+        return
+  await ctx.send("Wait a minute, who are you? You are not in my list!")
 
 @bot.command()
 async def skip(ctx):
   global guilds
   if len(guilds) > 0:
     for count, value in enumerate(guilds):
-      print(count, value.guild)
       if value.guild is ctx.guild:
         if value.done is False:
           guilds[count].task.cancel()
+          return
+        else:
+          await ctx.send("I'm not playing a song here")
+          return
+  await ctx.send("Wait a minute, who are you? You are not in my list!")
+
+@bot.command()
+async def stop(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        guilds[count].voice_stop()
+        return
+      else:
+        await ctx.send("I'm not playing a song here")
+        return
+  await ctx.send("Wait a minute, who are you? You are not in my list!")
+
+@bot.command()
+async def leave(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        guilds[count].leave()
+        return
+  await ctx.send("Wait a minute, who are you? You are not in my list!")
+
+@bot.command()
+async def join(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        guilds[count].join(ctx)
+        return
+
+  guilds.append(GuildData(ctx.guild))
+
+''''
+
+@bot.command()
+async def playlist(ctx,url):
+  global guilds
+  if len(guilds) > 0:
+    for count,value in enumerate(guilds):
+      if value.guild is ctx.guild:
 
 
 #Youtube download
@@ -234,7 +286,7 @@ async def play(ctx, *, query):
 
 
 
-''''    @bot.command()
+    @bot.command()
     async def volume(self, ctx, volume: int):
         """Changes the player's volume"""
 
