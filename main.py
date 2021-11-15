@@ -294,6 +294,10 @@ async def clear_queue(ctx):
   else:
     await ctx.send("Wait a minute, who are you?")
 
+@bot.command()
+async def help_me(ctx):
+  await ctx.send("Commands: \n--play 'url' to play a youtube video.\n--play_playlist 'playlist url' plays a youtube playlist by adding all other videos on queue.\n--queue to see the current queue.\n--remove_from_queue 'int: number on queue' to remove a certain video from queue.\n--skip to go to the next song on queue.\n--stop to stop playing audio (it does not clean up the playlist).\n--leave to leave the audio channel.\n--join to manually make the bot join the voice channel.\n--clear_queue to clean the complete queue.")
+
 
 #-----STARTING WEB SERVER-----
 #keep_alive()
