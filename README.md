@@ -4,7 +4,7 @@ This is a very bare bones music bot. Although it handles playlists and queues, i
 
 You can use Replit and UptimeBot to keep it alive.
 
-##Commands
+## Commands
 
 --play '"url"' to play a youtube video.
 
