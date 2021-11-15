@@ -74,9 +74,19 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
       #loops entries to grab each video_url
       for i, item in enumerate(video):
-        video = data['entries'][i]
+        video[i] = data['entries'][i]
 
     return video
+
+  @classmethod
+  async def get_title(cls,url):
+    ydl = youtube_dl.YoutubeDL({'outtmpl': '%(id)s%(ext)s', 'quiet':True,})
+    data = ydl.extract_info(url, download=False)
+    if 'entries' in data:
+      # Can be a playlist or a list of videos
+      return data['entries'][0]['title']
+
+    return data['title']
 
 
 class GuildData:
@@ -135,22 +145,25 @@ class GuildData:
     else:
       self.player_url.append(url)
       self.player_ctx.append(ctx)
-      await ctx.send(f"Added '<{url}>' to queue")
+      await ctx.send(f"Added '{await YTDLSource.get_title(url)}' to queue")
       
   async def remove_from_queue(self, ctx, i:int):
-    async with ctx.typing():
-      if len(self.player_url) < i or i-1 < 0:
-        await ctx.send(f"Hey {ctx.message.author.display_name} are you trying to fool me? This is out of the queue's bounds.")
-        return
-      await ctx.send(f"Removing '<{self.player_url[i-1]}>' from queue")
-      del self.player_url[i-1]
-      del self.player_ctx[i-1]
-      await self.queue(ctx)
+    if len(self.player_url) < i or i-1 < 0:
+      await ctx.send(f"Hey {ctx.message.author.display_name} are you trying to fool me? This is out of the queue's bounds.")
+      return
+    await ctx.send(f"Removing '{await YTDLSource.get_title(self.player_url[i-1])}' from queue")
+    del self.player_url[i-1]
+    del self.player_ctx[i-1]
+    await self.queue(ctx)
 
   async def queue(self,ctx):
+    
     if len(self.player_url) > 0:
-      for count, value in enumerate(self.player_url):
-        await ctx.send(f"Number {count + 1} is '<{value}>' sent by {self.player_ctx[count].message.author.display_name}")
+      text = ""
+      async with ctx.typing():
+        for count, value in enumerate(self.player_url):
+          text += (f"\nNumber {count + 1} is '{await YTDLSource.get_title(value)}' sent by {self.player_ctx[count].message.author.display_name}")
+        await ctx.send(text)
     else:
       await ctx.send("I don't have a queue here")
 
@@ -162,15 +175,12 @@ class GuildData:
     voice.stop()
 
   def clear_queue(self,ctx):
-    for count, value in enumerate(self.player_url):
-      del self.player_ctx[count]
-      del self.player_url[count]
+    self.player_ctx.clear()
+    self.player_url.clear()
 
       
-
 global guilds
 guilds = []
-
 
 async def timer(seconds,guildData):
   try:
@@ -205,8 +215,9 @@ async def play(ctx, *, url):
 @bot.command()
 async def play_playlist(ctx, *, url):
   await ctx.send('I recieved your playlist, calculating links.')
-  data = await YTDLSource.from_playlist(url)
-  await ctx.send(f"Playlist named {data[0]['playlist']}")
+  async with ctx.typing():
+    data = await YTDLSource.from_playlist(url)
+    await ctx.send(f"Playlist named {data[0]['playlist']}")
   exists, index = guild_check(ctx)
   if exists is False:
     print(f'Adding guild {ctx.guild}')
