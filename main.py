@@ -12,6 +12,7 @@ bot = commands.Bot(command_prefix='--')
 
 #-----BOT MUSIC PLAY (VERY EARLY VER)-----
 # Where did I get this? Here:
+#https://stackoverflow.com/questions/23727943/how-to-get-information-from-youtube-dl-in-python
 #https://stackoverflow.com/questions/64725932/discord-py-send-a-message-if-author-isnt-in-a-voice-channel
 #https://stackoverflow.com/questions/61900932/how-can-you-check-voice-channel-id-that-bot-is-connected-to-discord-py
 #https://www.youtube.com/watch?v=ml-5tXRmmFk
@@ -62,14 +63,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
     return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
   @classmethod
-  async def from_playlist(cls,url,*,loop=None,stream=False):
-    loop = loop or asyncio.get_event_loop()
-    data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
-    if 'entries' in data:
-      for count, value in enumerate(data):
-        data[count] = data['entries'][0]
+  async def from_playlist(cls,url):
+    ydl = youtube_dl.YoutubeDL({'outtmpl': '%(id)s%(ext)s', 'quiet':True,})
+    data = ydl.extract_info(url, download=False)
+    video = []
 
-    return data.get('url')
+    if 'entries' in data:
+      # Can be a playlist or a list of videos
+      video = data['entries']
+
+      #loops entries to grab each video_url
+      for i, item in enumerate(video):
+        video = data['entries'][i]
+
+    return video
 
 
 class GuildData:
@@ -84,7 +91,6 @@ class GuildData:
   async def song_done(self):
     self.done = True
     self.voice_stop()
-    print(self.get_voice().voice_members)
     if(len(self.player_url) > 0):
       print(f'Length of queue {len(self.player_url)} on guild {self.guild}')
       await self.play(self.player_ctx[0],self.player_url[0])
@@ -155,6 +161,11 @@ class GuildData:
     voice = self.get_voice()
     voice.stop()
 
+  def clear_queue(self,ctx):
+    for count, value in enumerate(self.player_url):
+      del self.player_ctx[count]
+      del self.player_url[count]
+
       
 
 global guilds
@@ -168,90 +179,110 @@ async def timer(seconds,guildData):
     print('Timer: cancel sleep')
     raise
   finally:
-    print('timer song dome')
+    print('Timer: song dome')
     await guildData.song_done()
 
+def guild_check(ctx):
+  global guilds
+  if len(guilds) > 0:
+    for count, value in enumerate(guilds):
+      if value.guild is ctx.guild:
+        return True, count
+    
+  return False, None
 
 @bot.command()
 async def play(ctx, *, url):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        print(f'Stream on existing guild {value.guild}')
-        await guilds[count].play(ctx,url)
-        return
-    
-  guilds.append(GuildData(ctx.guild))
-  await guilds[len(guilds)-1].play(ctx,url)
+  exists, count = guild_check(ctx)
+  if exists is True:
+    print(f'Stream on existing guild {guilds[count].guild}')
+    await guilds[count].play(ctx,url)
+  else:
+    print(f'Adding guild {ctx.guild}')
+    guilds.append(GuildData(ctx.guild))
+    await guilds[-1].play(ctx,url)
+
+@bot.command()
+async def play_playlist(ctx, *, url):
+  await ctx.send('I recieved your playlist, calculating links.')
+  data = await YTDLSource.from_playlist(url)
+  await ctx.send(f"Playlist named {data[0]['playlist']}")
+  exists, index = guild_check(ctx)
+  if exists is False:
+    print(f'Adding guild {ctx.guild}')
+    guilds.append(GuildData(ctx.guild))
+    index = -1
+  
+  print(f'Stream Playlist on guild {guilds[index].guild}')
+  for count, value in enumerate(data):
+    await guilds[index].play(ctx,value['webpage_url'])
+
+  print(f'{len(data)} is the length of links')
 
 @bot.command()
 async def queue(ctx):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        await guilds[count].queue(ctx)
-        return
-  await ctx.send("Wait a minute, who are you? You are not in my list!")
+  exists, count = guild_check(ctx)
+  if exists is True:
+    await guilds[count].queue(ctx)
+  else:
+    await ctx.send("Wait a minute, who are you? You are not in my list!")
 
 @bot.command()
 async def remove_from_queue(ctx, i:int):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        await guilds[count].remove_from_queue(ctx,i)
-        return
-  await ctx.send("Wait a minute, who are you? You are not in my list!")
+  exists, count = guild_check(ctx)
+  if exists is True:
+    await guilds[count].remove_from_queue(ctx,i)
+  else:
+    await ctx.send("Wait a minute, who are you? You are not in my list!")
 
 @bot.command()
 async def skip(ctx):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        if value.done is False:
-          guilds[count].task.cancel()
-          return
-        else:
-          await ctx.send("I'm not playing a song here")
-          return
-  await ctx.send("Wait a minute, who are you? You are not in my list!")
+  exists, count = guild_check(ctx)
+  if exists is True:
+    if guilds[count].done is False:
+      guilds[count].task.cancel()
+    else:
+      await ctx.send("I'm not playing a song here")
+  else:
+    await ctx.send("Wait a minute, who are you? You are not in my list!")
 
 @bot.command()
 async def stop(ctx):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        guilds[count].voice_stop()
-        return
-      else:
-        await ctx.send("I'm not playing a song here")
-        return
-  await ctx.send("Wait a minute, who are you? You are not in my list!")
+  exists, count = guild_check(ctx)
+  if exists is True:
+    guilds[count].voice_stop()
+  else:
+    await ctx.send("I'm not playing a song here")
+
 
 @bot.command()
 async def leave(ctx):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        guilds[count].leave()
-        return
-  await ctx.send("Wait a minute, who are you? You are not in my list!")
+  exists, count = guild_check(ctx)
+  if exists is True:
+    guilds[count].leave()
+  else:
+    await ctx.send("Wait a minute, who are you?")
+  
 
 @bot.command()
 async def join(ctx):
-  global guilds
-  if len(guilds) > 0:
-    for count, value in enumerate(guilds):
-      if value.guild is ctx.guild:
-        guilds[count].join(ctx)
-        return
+  exists, count = guild_check(ctx)
+  if exists is True:
+    await guilds[count].join(ctx)
+  else:
+    guilds.append(GuildData(ctx.guild))
+    await guilds[-1].join(ctx)
 
-  guilds.append(GuildData(ctx.guild))
+
+@bot.command()
+async def clear_queue(ctx):
+  exists, count = guild_check(ctx)
+  if exists is True:
+    guilds[count].clear_queue(ctx)
+    await ctx.send('Queue cleared')
+  else:
+    await ctx.send("Wait a minute, who are you?")
+
 
 ''''
 
