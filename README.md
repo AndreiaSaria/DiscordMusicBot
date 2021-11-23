@@ -6,6 +6,8 @@ You can use Replit and UptimeBot to keep it alive.
 
 ## Commands
 
+--help_me to see all commands on discord chat.
+
 --play '"url"' to play a youtube video.
 
 --play_playlist '"playlist url"' plays a youtube playlist by adding all other videos on queue.
