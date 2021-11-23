@@ -1,13 +1,13 @@
 import youtube_dl
 import asyncio
 import os
-#from keep_alive import keep_alive
+from keep_alive import keep_alive
 import discord
 from discord.ext import commands
 
 #-----AUTENTICATION-----
 #Here we do not use the client, we use commands https://discordpy.readthedocs.io/en/stable/ext/commands/commands.html#commands
-bot = commands.Bot(command_prefix='--')
+bot = commands.Bot(command_prefix='--', help_command=None)
 
 
 #-----BOT MUSIC PLAY (VERY EARLY VER)-----
@@ -270,7 +270,7 @@ async def stop(ctx):
 async def leave(ctx):
   exists, count = guild_check(ctx)
   if exists is True:
-    guilds[count].leave()
+    await guilds[count].leave()
   else:
     await ctx.send("Wait a minute, who are you?")
   
@@ -295,10 +295,11 @@ async def clear_queue(ctx):
     await ctx.send("Wait a minute, who are you?")
 
 @bot.command()
-async def help_me(ctx):
+async def help(ctx):
   await ctx.send("Commands: \n--play 'url' to play a youtube video.\n--play_playlist 'playlist url' plays a youtube playlist by adding all other videos on queue.\n--queue to see the current queue.\n--remove_from_queue 'int: number on queue' to remove a certain video from queue.\n--skip to go to the next song on queue.\n--stop to stop playing audio (it does not clean up the playlist).\n--leave to leave the audio channel.\n--join to manually make the bot join the voice channel.\n--clear_queue to clean the complete queue.")
 
 
 #-----STARTING WEB SERVER-----
-#keep_alive()
-bot.run(os.environ['MYSERVERTOKEN'])
+keep_alive()
+#bot.run(os.environ['MYSERVERTOKEN'])
+bot.run(os.environ['MUSICBOTTOKEN'])
