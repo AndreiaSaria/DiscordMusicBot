@@ -49,13 +49,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
     self.title = data.get('title')
     self.url = data.get('url')
     self.duration = data.get('duration')
-  '''
-  def youtube_extraction(url, download):
-    try:
-      return ytdl.extract_info(url,download)
-    except Exception as e: 
-      print(f'Exception in youtube dl: {e}')
-  '''
 
   @classmethod
   async def from_url(cls, url, *, loop=None, stream=False):
@@ -95,7 +88,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     return data['title']
 
-
+#Since this bot can run on multiple discord servers (they call them guilds) I made a class to separate each guild's playlist
+#This class handles the commands stated down below on --Commands--
 class GuildData:
   player_url = None
   player_ctx = None
@@ -113,8 +107,8 @@ class GuildData:
       await self.play(self.player_ctx[0],self.player_url[0])
       del self.player_url[0]
       del self.player_ctx[0]
-    else:
-      await self.leave()
+    #else:
+     # await self.leave()
 
   async def leave(self):
     voice = self.get_voice()
@@ -147,7 +141,7 @@ class GuildData:
 
         print(f'Duration {player.duration} in seconds' )
         ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
-      self.task = asyncio.ensure_future(timer(player.duration,self))
+      self.task = asyncio.create_task(timer(player.duration,self))
       await ctx.send(f'Now playing: {player.title}')
     else:
       self.player_url.append(url)
@@ -179,11 +173,9 @@ class GuildData:
 
   def voice_stop(self):
     voice = self.get_voice()
-    self.clear_queue()
-    self.task.cancel()
     voice.stop()
 
-  def clear_queue(self):
+  def clear_queue(self,ctx):
     self.player_ctx.clear()
     self.player_url.clear()
 
@@ -210,6 +202,7 @@ def guild_check(ctx):
     
   return False, None
 
+#-----COMMANDS-----
 @bot.command()
 async def play(ctx, *, url):
   exists, count = guild_check(ctx)
@@ -298,7 +291,7 @@ async def join(ctx):
 async def clear_queue(ctx):
   exists, count = guild_check(ctx)
   if exists is True:
-    guilds[count].clear_queue()
+    guilds[count].clear_queue(ctx)
     await ctx.send('Queue cleared')
   else:
     await ctx.send("Wait a minute, who are you?")
